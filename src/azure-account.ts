@@ -45,12 +45,14 @@ function getNodeModule<T>(moduleName: string): T | undefined {
 	return undefined;
 }
 
-const credentialsSection = 'VS Code Azure';
-
 async function getStoredCredentials(environment: Environment, migrateToken?: boolean) {
+	const azureConfig = workspace.getConfiguration('azure');
+	const credentialsSection = (azureConfig.get<string>('credentialsSection') || 'VS Code Azure');
+
 	if (!keytar) {
 		return;
 	}
+
 	try {
 		if (migrateToken) {
 			const token = await keytar.getPassword('VSCode Public Azure', 'Refresh Token');
@@ -72,6 +74,9 @@ async function getStoredCredentials(environment: Environment, migrateToken?: boo
 }
 
 async function storeRefreshToken(environment: Environment, token: string) {
+	const azureConfig = workspace.getConfiguration('azure');
+	const credentialsSection = (azureConfig.get<string>('credentialsSection') || 'VS Code Azure');
+
 	if (keytar) {
 		try {
 			await keytar.setPassword(credentialsSection, environment.name, token);
@@ -82,6 +87,9 @@ async function storeRefreshToken(environment: Environment, token: string) {
 }
 
 async function deleteRefreshToken(environmentName: string) {
+	const azureConfig = workspace.getConfiguration('azure');
+	const credentialsSection = (azureConfig.get<string>('credentialsSection') || 'VS Code Azure');
+
 	if (keytar) {
 		try {
 			await keytar.deletePassword(credentialsSection, environmentName);
@@ -190,7 +198,7 @@ class ProxyTokenCache {
 	}
 }
 
-type LoginTrigger = 'activation' | 'login' | 'loginWithDeviceCode' | 'loginToCloud' | 'cloudChange' | 'tenantChange';
+type LoginTrigger = 'activation' | 'login' | 'loginWithDeviceCode' | 'loginToCloud' | 'cloudChange' | 'tenantChange' | 'credentialsSectionChange';
 type CodePath = 'tryExisting' | 'newLogin' | 'newLoginCodeFlow' | 'newLoginDeviceCode';
 
 export class AzureLoginHelper {
@@ -221,10 +229,20 @@ export class AzureLoginHelper {
 		subscriptions.push(this.api.onSessionsChanged(() => this.updateSubscriptions().catch(console.error)));
 		subscriptions.push(this.api.onSubscriptionsChanged(() => this.updateFilters()));
 		subscriptions.push(workspace.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration('azure.cloud') || e.affectsConfiguration('azure.tenant')) {
+			if (e.affectsConfiguration('azure.cloud') || e.affectsConfiguration('azure.tenant') || e.affectsConfiguration('azure.credentialsSection')) {
 				const doLogin = this.doLogin;
 				this.doLogin = false;
-				this.initialize(e.affectsConfiguration('azure.cloud') ? 'cloudChange' : 'tenantChange', doLogin)
+				var trigger: LoginTrigger;
+
+				if (e.affectsConfiguration('azure.cloud')) {
+					trigger = 'cloudChange';
+				} else if (e.affectsConfiguration('azure.tenant')) {
+					trigger = 'tenantChange';
+				} else {
+					trigger = 'credentialsSectionChange'
+				}
+
+				this.initialize(trigger, doLogin)
 					.catch(console.error);
 			} else if (e.affectsConfiguration('azure.resourceFilter')) {
 				this.updateFilters(true);
